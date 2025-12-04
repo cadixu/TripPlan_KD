@@ -28,7 +28,8 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        # 修改這裡：使用 npm install 取代 npm ci，因為儲存庫中可能沒有 package-lock.json
+        run: npm install
 
       - name: Build project
         run: npm run build
