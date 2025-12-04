@@ -1,0 +1,5 @@
+{
+  "name": "TripPlan_KD",
+  "description": "一個專為旅行設計的直觀日曆應用，讓您輕鬆標記去程（黃色）與返程（藍色）日期，完美適配手機操作。",
+  "requestFramePermissions": []
+}
