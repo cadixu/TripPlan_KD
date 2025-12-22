@@ -17,9 +17,8 @@ import {
   startOfDay,
   endOfDay
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, PlaneTakeoff, PlaneLanding, Calendar as CalendarIcon } from 'lucide-react';
-import { DateRange, Trip } from '../types';
-import { getHoliday } from '../utils/holidayData';
+import { ChevronLeft, ChevronRight, PlaneTakeoff, PlaneLanding } from 'lucide-react';
+import { DateRange, Trip, HolidayMap } from '../types';
 
 interface CalendarProps {
   trips: Trip[];
@@ -27,6 +26,7 @@ interface CalendarProps {
   onDraftChange: (range: DateRange) => void;
   readOnly?: boolean;
   onDayClick?: (date: Date, relevantTrip?: Trip) => void;
+  holidays: HolidayMap;
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -36,7 +36,8 @@ export const Calendar: React.FC<CalendarProps> = ({
   draftRange, 
   onDraftChange, 
   readOnly = false, 
-  onDayClick 
+  onDayClick,
+  holidays
 }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
@@ -76,7 +77,6 @@ export const Calendar: React.FC<CalendarProps> = ({
 
   return (
     <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
-      {/* Header */}
       <div className="p-5 flex items-center justify-between bg-white border-b border-gray-50">
         <button onClick={() => setCurrentMonth(addMonths(currentMonth, -1))} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
           <ChevronLeft className="w-5 h-5 text-gray-600" />
@@ -97,7 +97,6 @@ export const Calendar: React.FC<CalendarProps> = ({
         </button>
       </div>
 
-      {/* Weekdays */}
       <div className="grid grid-cols-7 bg-gray-50/50">
         {WEEKDAYS.map(day => (
           <div key={day} className="py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -106,15 +105,13 @@ export const Calendar: React.FC<CalendarProps> = ({
         ))}
       </div>
 
-      {/* Days */}
       <div className="grid grid-cols-7 gap-px bg-gray-100">
         {days.map((day, idx) => {
           const dateStr = format(day, 'yyyy-MM-dd');
-          const holiday = getHoliday(dateStr);
+          const holiday = holidays[dateStr];
           const isCurrMonth = isSameMonth(day, currentMonth);
           const isTdy = isToday(day);
           
-          // 已儲存行程的標記
           const existingTrip = trips.find(t => 
             isWithinInterval(day, { start: startOfDay(t.startDate), end: endOfDay(t.endDate) })
           );
@@ -122,14 +119,12 @@ export const Calendar: React.FC<CalendarProps> = ({
           const isTripEnd = existingTrip && isSameDay(day, existingTrip.endDate);
           const isTripRange = existingTrip && !isTripStart && !isTripEnd;
 
-          // 編輯中(Draft)的標記
           const isDraftStart = draftRange.startDate && isSameDay(day, draftRange.startDate);
           const isDraftEnd = draftRange.endDate && isSameDay(day, draftRange.endDate);
           const isDraftRange = draftRange.startDate && draftRange.endDate && 
                                isWithinInterval(day, { start: draftRange.startDate, end: draftRange.endDate }) &&
                                !isDraftStart && !isDraftEnd;
 
-          // 優先顯示 Draft 顏色
           let bgColor = 'bg-white';
           let textColor = isCurrMonth ? 'text-gray-800' : 'text-gray-300';
           let icon = null;
@@ -156,10 +151,6 @@ export const Calendar: React.FC<CalendarProps> = ({
             textColor = 'text-gray-500';
           }
 
-          const isSunday = day.getDay() === 0;
-          const isSaturday = day.getDay() === 6;
-          const isWeekend = isSunday || isSaturday;
-
           return (
             <button
               key={idx}
@@ -167,7 +158,7 @@ export const Calendar: React.FC<CalendarProps> = ({
               className={`relative h-14 sm:h-16 flex flex-col items-center justify-center transition-all ${bgColor} ${isCurrMonth ? 'hover:bg-opacity-90' : 'opacity-40'}`}
             >
               {isTdy && !isDraftStart && !isDraftEnd && (
-                <div className="absolute top-1 left-1 w-1 h-1 bg-blue-500 rounded-full" />
+                <div className="absolute top-1 left-1 w-1.5 h-1.5 bg-blue-500 rounded-full shadow-sm" />
               )}
               
               <span className={`text-sm ${textColor} z-10`}>
@@ -175,7 +166,7 @@ export const Calendar: React.FC<CalendarProps> = ({
               </span>
 
               {holiday && isCurrMonth && (
-                <span className="text-[8px] text-red-400 absolute bottom-1 w-full text-center truncate px-1">
+                <span className={`text-[8px] absolute bottom-1 w-full text-center truncate px-1 font-bold ${holiday.type === 'commemoration' ? 'text-slate-400' : 'text-rose-500'}`}>
                   {holiday.name}
                 </span>
               )}

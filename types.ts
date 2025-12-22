@@ -11,7 +11,15 @@ export interface Trip {
   lastUpdated?: string;
 }
 
-export type SelectionMode = 'start' | 'end' | 'idle';
+export type HolidayType = 'holiday' | 'makeup' | 'commemoration';
+
+export interface HolidayInfo {
+  name: string;
+  type: HolidayType;
+  region: 'TW' | 'CN' | 'BOTH';
+}
+
+export type HolidayMap = Record<string, HolidayInfo>;
 
 export interface DayInfo {
   date: Date;
