@@ -1,53 +1,47 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { format, differenceInDays } from 'date-fns';
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { format, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { Calendar } from './components/Calendar';
 import { DateRange, Trip } from './types';
-import { Trash2, CheckCircle2, Cloud, Loader2, Plus, X, CalendarDays, Plane, RefreshCw, AlertCircle } from 'lucide-react';
+import { 
+  Trash2, CheckCircle2, Cloud, Loader2, Plus, X, 
+  CalendarDays, Plane, RefreshCw, AlertCircle, 
+  ChevronRight, Filter, Clock
+} from 'lucide-react';
 import { saveTripToCloud, getAllTripsFromCloud, deleteTripFromCloud, API_URL } from './utils/api';
 
-const WEEKDAYS_ZH = ['日', '一', '二', '三', '四', '五', '六'];
-
 export default function App() {
-  // 所有行程列表
   const [trips, setTrips] = useState<Trip[]>([]);
-  // 正在編輯的草稿 (新增或修改)
   const [draftRange, setDraftRange] = useState<DateRange>({ startDate: null, endDate: null });
-  
-  // 模式: true = 新增行程中, false = 瀏覽列表模式
   const [isEditMode, setIsEditMode] = useState(false);
+  const [showPastTrips, setShowPastTrips] = useState(true);
   
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isHolidayUpdating, setIsHolidayUpdating] = useState(false);
 
-  // 用來同步比對的基準
   const lastServerHash = useRef<string>("");
-
   const [toast, setToast] = useState({ show: false, msg: '', type: 'success' });
+
   const showToast = (msg: string, type: 'success'|'error'|'info' = 'success') => {
     setToast({ show: true, msg, type });
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
   };
 
-  // 1. 初始化與同步 (Polling)
   const fetchTrips = async (silent = false) => {
     if (!API_URL) return;
     if (!silent) setIsLoading(true);
     try {
       const data = await getAllTripsFromCloud();
-      
-      // 簡單雜湊比對，決定是否更新 State (避免畫面閃爍)
       const currentHash = JSON.stringify(data.map(t => t.id + t.lastUpdated));
       if (currentHash !== lastServerHash.current) {
         setTrips(data);
         lastServerHash.current = currentHash;
-        if (silent && data.length > 0) showToast('已同步最新行程', 'info');
+        if (silent && data.length > 0) showToast('行程已同步', 'info');
       }
     } catch (e: any) {
-       if (!silent && e.message.includes("找不到試算表")) {
-         showToast(e.message, 'error');
-       }
+       showToast(e.message || '同步失敗', 'error');
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -57,10 +51,9 @@ export default function App() {
     fetchTrips();
   }, []);
 
-  // Polling: 瀏覽模式下每 5 秒同步一次
   useEffect(() => {
     if (isEditMode || !API_URL) return;
-    const interval = setInterval(() => fetchTrips(true), 5000);
+    const interval = setInterval(() => fetchTrips(true), 10000);
     return () => clearInterval(interval);
   }, [isEditMode]);
 
@@ -68,19 +61,10 @@ export default function App() {
     if (!draftRange.startDate || !draftRange.endDate) return;
     setIsSaving(true);
     try {
-      // 儲存 (目前邏輯是新增，未來可擴充編輯舊 ID)
       const newId = await saveTripToCloud(draftRange, null);
-      
-      // 驗證儲存結果
       const latestTrips = await getAllTripsFromCloud();
-      const isSaved = latestTrips.some(t => t.id === newId);
-      
-      if (!isSaved) {
-        throw new Error("儲存顯示成功但同步失敗，請確認 GAS 是否已『重新部署』(發布新版本)。");
-      }
-
-      setTrips(latestTrips); // 直接更新畫面
-      showToast('行程已新增成功', 'success');
+      setTrips(latestTrips);
+      showToast('行程儲存成功', 'success');
       setDraftRange({ startDate: null, endDate: null });
       setIsEditMode(false);
     } catch (e: any) {
@@ -106,81 +90,80 @@ export default function App() {
     }
   };
 
-  const handleResetDraft = () => {
-    setDraftRange({ startDate: null, endDate: null });
-  };
+  const filteredTrips = useMemo(() => {
+    const sorted = [...trips].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+    if (showPastTrips) return sorted;
+    const now = startOfDay(new Date());
+    return sorted.filter(t => !isBefore(endOfDay(t.endDate), now));
+  }, [trips, showPastTrips]);
 
-  const handleDayClick = (date: Date, trip?: Trip) => {
-    if (!isEditMode && trip) {
-       const days = differenceInDays(date, trip.startDate) + 1;
-       const total = differenceInDays(trip.endDate, trip.startDate) + 1;
-       showToast(`${format(date, 'M/d')} - 旅程第 ${days}/${total} 天`, 'info');
+  const getTripStatus = (trip: Trip) => {
+    const now = startOfDay(new Date());
+    const start = startOfDay(trip.startDate);
+    const end = endOfDay(trip.endDate);
+
+    if (isWithinInterval(now, { start, end })) {
+      const dayCount = differenceInDays(now, start) + 1;
+      return { label: `進行中 (第 ${dayCount} 天)`, color: 'bg-green-100 text-green-700' };
     }
-  };
-
-  // 模擬更新假日資料
-  const handleUpdateHolidays = () => {
-    setIsHolidayUpdating(true);
-    setTimeout(() => {
-      setIsHolidayUpdating(false);
-      showToast('已更新至最新假日與補班資訊', 'success');
-    }, 1500);
+    if (isAfter(start, now)) {
+      const diff = differenceInDays(start, now);
+      return { label: `${diff} 天後出發`, color: 'bg-blue-100 text-blue-700' };
+    }
+    return { label: '已結束', color: 'bg-gray-100 text-gray-500' };
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center pt-4 pb-32 px-4 bg-gradient-to-br from-blue-50 to-indigo-50 relative">
+    <div className="min-h-screen flex flex-col items-center pt-6 pb-32 px-4 bg-[#F8FAFC]">
       
       {/* Toast */}
-      <div className={`fixed top-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-full shadow-xl text-sm font-medium flex items-center gap-2 transition-all z-50 whitespace-nowrap
-        ${toast.show ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}
-        ${toast.type === 'error' ? 'bg-red-600 text-white' : toast.type === 'info' ? 'bg-gray-800 text-white' : 'bg-green-600 text-white'}
+      <div className={`fixed top-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl shadow-2xl text-sm font-bold flex items-center gap-3 transition-all z-[100] whitespace-nowrap
+        ${toast.show ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-4 scale-95 pointer-events-none'}
+        ${toast.type === 'error' ? 'bg-red-500 text-white' : toast.type === 'info' ? 'bg-slate-800 text-white' : 'bg-emerald-500 text-white'}
       `}>
-        {toast.type === 'error' && <AlertCircle className="w-4 h-4" />}
-        {toast.type === 'success' && <CheckCircle2 className="w-4 h-4" />}
+        {toast.type === 'error' ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
         {toast.msg}
       </div>
 
-      {/* Header Info */}
-      <div className="w-full max-w-md mb-4 flex justify-between items-center px-2">
-         <div className="flex flex-col">
-           <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-             <Plane className="w-5 h-5 text-blue-500" />
-             我的行程規劃
-           </h1>
-           <span className="text-xs text-gray-500">
-             {isLoading ? '正在同步雲端...' : `目前共有 ${trips.length} 個行程`}
-           </span>
+      {/* App Header */}
+      <header className="w-full max-w-md mb-8 flex justify-between items-end px-2">
+         <div className="flex flex-col gap-1">
+           <div className="flex items-center gap-2">
+             <div className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-200">
+                <Plane className="w-5 h-5 text-white" />
+             </div>
+             <h1 className="text-2xl font-black text-slate-800 tracking-tight">TripPlan</h1>
+           </div>
+           <p className="text-xs font-medium text-slate-400">
+             {isLoading ? '同步中...' : `共有 ${trips.length} 個旅程`}
+           </p>
          </div>
 
-         {/* 右側按鈕區 */}
-         <div className="flex items-center gap-2">
-           {!isEditMode && (
-             <button 
-                onClick={handleUpdateHolidays} 
-                disabled={isHolidayUpdating}
-                className={`p-2 rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all
-                  ${isHolidayUpdating ? 'opacity-50' : 'hover:bg-blue-50 hover:text-blue-500 hover:border-blue-200'}
-                `}
-                title="更新假日資料"
-             >
-               <RefreshCw className={`w-4 h-4 ${isHolidayUpdating ? 'animate-spin' : ''}`} />
-             </button>
-           )}
-           
-           {isEditMode && (
-             <button onClick={() => setIsEditMode(false)} className="text-gray-500 hover:bg-gray-200 p-2 rounded-full">
-               <X className="w-5 h-5" />
-             </button>
-           )}
+         <div className="flex gap-2">
+            <button 
+              onClick={() => setShowPastTrips(!showPastTrips)}
+              className={`p-2.5 rounded-xl border transition-all ${showPastTrips ? 'bg-white border-slate-200 text-slate-500' : 'bg-blue-50 border-blue-200 text-blue-600'}`}
+              title={showPastTrips ? "隱藏過期行程" : "顯示所有行程"}
+            >
+              <Filter className="w-5 h-5" />
+            </button>
+            <button 
+                onClick={() => fetchTrips()} 
+                className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-all"
+            >
+               <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
          </div>
-      </div>
+      </header>
 
-      {/* Calendar Component */}
-      <div className="w-full flex justify-center mb-6 relative z-10">
-        <div className="relative w-full max-w-md">
+      {/* Calendar Section */}
+      <section className="w-full max-w-md mb-10">
+        <div className="relative group">
            {isEditMode && (
-             <div className="absolute -top-10 left-0 right-0 bg-blue-600 text-white text-xs py-1.5 px-4 rounded-t-lg shadow-sm text-center font-bold animate-in fade-in slide-in-from-bottom-2">
-               編輯模式：請點選去程與返程日期
+             <div className="absolute -top-12 left-0 right-0 flex justify-center animate-bounce">
+                <div className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-4 py-1.5 rounded-full shadow-lg border-2 border-white">
+                  選擇日期：去程(黃) / 返程(藍)
+                </div>
              </div>
            )}
           <Calendar 
@@ -188,106 +171,111 @@ export default function App() {
             draftRange={draftRange}
             onDraftChange={setDraftRange}
             readOnly={!isEditMode}
-            onDayClick={handleDayClick}
           />
         </div>
-      </div>
+      </section>
 
-      {/* Mode Switch & Lists */}
-      <div className="w-full max-w-md space-y-4">
-        
-        {/* VIEW MODE: Trip List */}
+      {/* Trip List Section */}
+      <section className="w-full max-w-md space-y-4">
         {!isEditMode && (
-          <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {trips.length > 0 && (
-              <div className="text-xs text-gray-400 pl-2 mb-1">已儲存的行程：</div>
-            )}
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-sm font-bold text-slate-400 flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                行程清單
+              </h2>
+              {!showPastTrips && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">隱藏已結束</span>}
+            </div>
             
-            {trips.map(trip => {
+            {filteredTrips.map(trip => {
               const days = differenceInDays(trip.endDate, trip.startDate) + 1;
-              const isDeletingThis = isDeleting === trip.id;
+              const status = getTripStatus(trip);
               
               return (
-                <div key={trip.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between group hover:shadow-md transition-all cursor-pointer" onClick={() => handleDayClick(trip.startDate, trip)}>
-                   <div className="flex flex-col">
-                     <div className="flex items-center gap-2 mb-1">
-                       <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                         {days} 天
+                <div key={trip.id} className="relative bg-white rounded-3xl p-5 shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-xl hover:-translate-y-1 transition-all">
+                   <div className="flex flex-col gap-2">
+                     <div className="flex items-center gap-2">
+                       <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg ${status.color}`}>
+                         {status.label}
                        </span>
-                       <span className="text-gray-400 text-xs">
-                         {format(trip.startDate, 'yyyy')}
+                       <span className="text-slate-300 text-[10px] font-bold">
+                         {days} 天旅程
                        </span>
                      </div>
-                     <div className="flex items-center gap-1.5 text-gray-800 font-bold">
-                       <span>{format(trip.startDate, 'M/d')}</span>
-                       <span className="text-gray-300">→</span>
-                       <span>{format(trip.endDate, 'M/d')}</span>
+                     <div className="flex items-center gap-3 text-slate-800">
+                       <div className="flex flex-col">
+                         <span className="text-xs text-slate-400 font-bold uppercase">{format(trip.startDate, 'eee')}</span>
+                         <span className="text-xl font-black">{format(trip.startDate, 'MM/dd')}</span>
+                       </div>
+                       <ChevronRight className="w-5 h-5 text-slate-200" />
+                       <div className="flex flex-col">
+                         <span className="text-xs text-slate-400 font-bold uppercase">{format(trip.endDate, 'eee')}</span>
+                         <span className="text-xl font-black">{format(trip.endDate, 'MM/dd')}</span>
+                       </div>
                      </div>
                    </div>
 
                    <button 
                      onClick={(e) => handleDelete(trip.id, e)}
                      disabled={!!isDeleting}
-                     className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                     className="p-3 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"
                    >
-                     {isDeletingThis ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                     {isDeleting === trip.id ? <Loader2 className="w-6 h-6 animate-spin" /> : <Trash2 className="w-6 h-6" />}
                    </button>
                 </div>
               );
             })}
 
-            {trips.length === 0 && !isLoading && (
-              <div className="text-center py-10 text-gray-400 border-2 border-dashed border-gray-200 rounded-2xl">
-                <CalendarDays className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                <p>目前沒有行程</p>
-                <p className="text-xs">點擊下方按鈕新增</p>
+            {filteredTrips.length === 0 && (
+              <div className="text-center py-16 bg-white/50 border-2 border-dashed border-slate-200 rounded-[40px]">
+                <CalendarDays className="w-12 h-12 mx-auto mb-4 text-slate-200" />
+                <p className="text-slate-400 font-bold">尚無符合條件的行程</p>
+                <p className="text-[10px] text-slate-300 mt-1 uppercase tracking-widest">Create your first adventure</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Action Buttons (Fixed Bottom) */}
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur-md border-t border-gray-200 z-50 md:sticky md:bottom-auto md:bg-transparent md:border-0 md:p-0">
+        {/* FAB / Action Controls */}
+        <div className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 z-[90]">
           <div className="w-full max-w-md mx-auto">
              {isEditMode ? (
-               <div className="grid grid-cols-4 gap-2">
+               <div className="flex gap-3">
                  <button 
-                   onClick={handleResetDraft}
-                   disabled={!draftRange.startDate}
-                   className="col-span-1 py-3 rounded-xl border border-gray-200 text-gray-500 hover:bg-red-50 hover:text-red-500 flex justify-center items-center"
+                   onClick={() => setDraftRange({ startDate: null, endDate: null })}
+                   className="p-4 rounded-2xl bg-slate-50 text-slate-400 hover:text-red-500 transition-colors"
                  >
-                   <Trash2 className="w-5 h-5" />
+                   <RefreshCw className="w-6 h-6" />
                  </button>
                  <button 
                    onClick={() => setIsEditMode(false)}
-                   className="col-span-1 py-3 rounded-xl border border-gray-200 text-gray-600 font-medium hover:bg-gray-50"
+                   className="flex-1 py-4 rounded-2xl bg-white border border-slate-200 text-slate-600 font-bold"
                  >
                    取消
                  </button>
                  <button 
                    onClick={handleSave}
                    disabled={!draftRange.startDate || !draftRange.endDate || isSaving}
-                   className={`col-span-2 py-3 rounded-xl font-bold text-white shadow-lg flex justify-center items-center gap-2
-                     ${draftRange.startDate && draftRange.endDate ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' : 'bg-gray-300 cursor-not-allowed shadow-none'}
+                   className={`flex-[2] py-4 rounded-2xl font-black text-white shadow-2xl transition-all active:scale-95 flex items-center justify-center gap-2
+                     ${draftRange.startDate && draftRange.endDate ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 cursor-not-allowed'}
                    `}
                  >
-                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cloud className="w-5 h-5" />}
+                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
                    儲存行程
                  </button>
                </div>
              ) : (
                <button 
                  onClick={() => { setIsEditMode(true); setDraftRange({startDate:null, endDate:null}); }}
-                 className="w-full py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-xl shadow-blue-200 flex items-center justify-center gap-2 transition-transform active:scale-95"
+                 className="w-full py-5 rounded-[28px] font-black text-white bg-slate-900 hover:bg-black shadow-2xl shadow-slate-200 flex items-center justify-center gap-3 transition-all active:scale-95 group"
                >
-                 <Plus className="w-6 h-6" />
-                 新增一段旅程
+                 <Plus className="w-6 h-6 group-hover:rotate-90 transition-transform" />
+                 規劃新旅程
                </button>
              )}
           </div>
         </div>
-
-      </div>
+      </section>
     </div>
   );
 }
