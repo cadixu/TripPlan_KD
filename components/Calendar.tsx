@@ -17,7 +17,7 @@ import {
   startOfDay,
   endOfDay
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, PlaneTakeoff, PlaneLanding } from 'lucide-react';
+import { ChevronLeft, ChevronRight, PlaneTakeoff, PlaneLanding, Gift } from 'lucide-react';
 import { DateRange, Trip, HolidayMap } from '../types';
 
 interface CalendarProps {
@@ -149,6 +149,8 @@ export const Calendar: React.FC<CalendarProps> = ({
           } else if (isTripRange) {
             bgColor = 'bg-gray-50';
             textColor = 'text-gray-500';
+          } else if (holiday?.type === 'commemoration') {
+            bgColor = 'bg-purple-50'; // 生日背景色
           }
 
           return (
@@ -166,10 +168,16 @@ export const Calendar: React.FC<CalendarProps> = ({
               </span>
 
               {holiday && isCurrMonth && (
-                <span className={`text-[8px] absolute bottom-1 w-full text-center truncate px-1 font-bold ${holiday.type === 'makeup' ? 'text-slate-400' : 'text-rose-500'}`}>
+                <span className={`text-[8px] absolute bottom-1 w-full text-center truncate px-1 font-bold 
+                  ${holiday.type === 'makeup' ? 'text-slate-400' : 
+                    holiday.type === 'commemoration' ? 'text-purple-600' : 'text-rose-500'}`}>
                   {holiday.name}
                   {holiday.type === 'makeup' && <span className="ml-0.5">(補)</span>}
                 </span>
+              )}
+
+              {holiday?.type === 'commemoration' && isCurrMonth && !isDraftStart && !isDraftEnd && (
+                <Gift className="w-2.5 h-2.5 absolute top-1 right-1 text-purple-400 opacity-50" />
               )}
 
               {icon}
