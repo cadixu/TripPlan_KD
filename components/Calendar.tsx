@@ -166,8 +166,9 @@ export const Calendar: React.FC<CalendarProps> = ({
               </span>
 
               {holiday && isCurrMonth && (
-                <span className={`text-[8px] absolute bottom-1 w-full text-center truncate px-1 font-bold ${holiday.type === 'commemoration' ? 'text-slate-400' : 'text-rose-500'}`}>
+                <span className={`text-[8px] absolute bottom-1 w-full text-center truncate px-1 font-bold ${holiday.type === 'makeup' ? 'text-slate-400' : 'text-rose-500'}`}>
                   {holiday.name}
+                  {holiday.type === 'makeup' && <span className="ml-0.5">(補)</span>}
                 </span>
               )}
 

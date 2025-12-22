@@ -33,10 +33,14 @@ export default function App() {
 
   const syncHolidays = async () => {
     setIsHolidayLoading(true);
-    const currentYear = new Date().getFullYear();
-    const map = await fetchHolidays([currentYear, currentYear + 1]);
-    setHolidays(map);
-    setIsHolidayLoading(false);
+    try {
+      const map = await fetchHolidays();
+      setHolidays(map);
+    } catch (e) {
+      console.error('Holiday sync failed');
+    } finally {
+      setIsHolidayLoading(false);
+    }
   };
 
   const fetchTrips = async (silent = false) => {
@@ -48,10 +52,10 @@ export default function App() {
       if (currentHash !== lastServerHash.current) {
         setTrips(data);
         lastServerHash.current = currentHash;
-        if (silent && data.length > 0) showToast('數據已更新', 'info');
+        if (silent && data.length > 0) showToast('數據已同步', 'info');
       }
     } catch (e: any) {
-       showToast(e.message || '連線失敗', 'error');
+       showToast('雲端連線失敗', 'error');
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -64,7 +68,7 @@ export default function App() {
 
   useEffect(() => {
     if (isEditMode || !API_URL) return;
-    const interval = setInterval(() => fetchTrips(true), 15000);
+    const interval = setInterval(() => fetchTrips(true), 20000);
     return () => clearInterval(interval);
   }, [isEditMode]);
 
@@ -79,7 +83,7 @@ export default function App() {
       setDraftRange({ startDate: null, endDate: null });
       setIsEditMode(false);
     } catch (e: any) {
-      showToast(e.message || '儲存失敗', 'error');
+      showToast('儲存失敗', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -151,7 +155,7 @@ export default function App() {
              {!isHolidayLoading && (
                <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-bold">
                  <Globe className="w-3 h-3" />
-                 行事曆已同步
+                 訂閱行事曆已同步
                </div>
              )}
            </div>

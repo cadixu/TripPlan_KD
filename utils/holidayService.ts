@@ -1,25 +1,53 @@
 
 import { HolidayMap, HolidayInfo } from '../types';
 
-const CACHE_KEY = 'tripplan_holiday_cache';
-const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24小時過期
+const CACHE_KEY = 'tripplan_holiday_ics_cache';
+const CACHE_EXPIRY = 24 * 60 * 60 * 1000;
 
-// 針對 API 可能漏掉的特定紀念日進行補充
-const SPECIAL_MEMORIAL_DAYS: HolidayMap = {
-  '2024-12-25': { name: '行憲紀念日', type: 'commemoration', region: 'TW' },
-  '2025-12-25': { name: '行憲紀念日', type: 'commemoration', region: 'TW' },
-  '2026-12-25': { name: '行憲紀念日', type: 'commemoration', region: 'TW' },
+// 定應來源 (選擇 CORS 友善或常見的 CDN/GitHub 來源)
+const SOURCES = [
+  {
+    url: 'https://raw.githubusercontent.com/shuyz/china-holiday-calender/master/holidayCal.ics',
+    region: 'CN' as const
+  },
+  {
+    // 台灣政府與社群維護的 ICS (透過 raw 存取避免 CORS)
+    url: 'https://raw.githubusercontent.com/abc9070410/Taiwan-Holiday-ICS/master/taiwan_holidays.ics',
+    region: 'TW' as const
+  }
+];
+
+// 簡易 ICS 解析器
+const parseICS = (icsText: string, region: 'TW' | 'CN'): HolidayMap => {
+  const map: HolidayMap = {};
+  const events = icsText.split('BEGIN:VEVENT');
+  
+  events.shift(); // 移除 header 部分
+
+  events.forEach(event => {
+    const summaryMatch = event.match(/SUMMARY:(.*)/);
+    const dtStartMatch = event.match(/DTSTART;VALUE=DATE:(\d{8})/) || event.match(/DTSTART:(\d{8})/);
+    
+    if (summaryMatch && dtStartMatch) {
+      const name = summaryMatch[1].trim();
+      const rawDate = dtStartMatch[1]; // YYYYMMDD
+      const formattedDate = `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`;
+      
+      // 判定是否為補班日
+      const isMakeup = name.includes('補班') || name.includes('上班') || name.includes('工作日') || name.includes('Working Day');
+      
+      map[formattedDate] = {
+        name: name.replace(/\[.*\]/g, '').trim(), // 移除括號備註
+        type: isMakeup ? 'makeup' : 'holiday',
+        region: region
+      };
+    }
+  });
+
+  return map;
 };
 
-interface NagerHoliday {
-  date: string;
-  localName: string;
-  name: string;
-  countryCode: string;
-  types: string[];
-}
-
-export const fetchHolidays = async (years: number[]): Promise<HolidayMap> => {
+export const fetchHolidays = async (): Promise<HolidayMap> => {
   // 檢查快取
   const cached = localStorage.getItem(CACHE_KEY);
   if (cached) {
@@ -29,50 +57,43 @@ export const fetchHolidays = async (years: number[]): Promise<HolidayMap> => {
     }
   }
 
-  const newHolidayMap: HolidayMap = { ...SPECIAL_MEMORIAL_DAYS };
-  const countries = ['TW', 'CN'];
+  let finalMap: HolidayMap = {};
 
   try {
-    const fetchPromises = years.flatMap(year => 
-      countries.map(country => 
-        fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`)
-          .then(res => res.ok ? res.json() : [])
-          .catch(() => [])
+    const results = await Promise.all(
+      SOURCES.map(source => 
+        fetch(source.url)
+          .then(res => res.ok ? res.text() : '')
+          .then(text => parseICS(text, source.region))
+          .catch(() => ({}))
       )
     );
 
-    const results = await Promise.all(fetchPromises);
-    const allHolidays: NagerHoliday[] = results.flat();
-
-    allHolidays.forEach(h => {
-      // 如果同一天多個區域都有，標註為 BOTH
-      const existing = newHolidayMap[h.date];
-      if (existing) {
-        if (existing.region !== h.countryCode) {
-          existing.region = 'BOTH';
-          // 偏好顯示本地名稱，但如果有多個名稱則合併
-          if (!existing.name.includes(h.localName)) {
-            existing.name = `${existing.name}/${h.localName}`;
+    // 合併結果
+    results.forEach(res => {
+      Object.entries(res).forEach(([date, info]) => {
+        if (finalMap[date]) {
+          // 如果同一天都有，標註為 BOTH
+          if (finalMap[date].region !== info.region) {
+            finalMap[date].region = 'BOTH';
           }
+        } else {
+          finalMap[date] = info;
         }
-      } else {
-        newHolidayMap[h.date] = {
-          name: h.localName,
-          type: 'holiday',
-          region: h.countryCode as 'TW' | 'CN'
-        };
-      }
+      });
     });
 
-    // 儲存至快取
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      data: newHolidayMap,
-      timestamp: Date.now()
-    }));
+    // 儲存快取
+    if (Object.keys(finalMap).length > 0) {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        data: finalMap,
+        timestamp: Date.now()
+      }));
+    }
 
-    return newHolidayMap;
+    return finalMap;
   } catch (error) {
-    console.error('Failed to fetch holidays:', error);
-    return SPECIAL_MEMORIAL_DAYS; // 失敗時回傳基礎資料
+    console.error('ICS Fetch failed:', error);
+    return {};
   }
 };
